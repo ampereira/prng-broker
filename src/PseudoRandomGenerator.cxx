@@ -21,7 +21,7 @@ boost::lockfree::queue<double> lfq2 (MAX_PRNS);
 // bool shutdown_prn = false;
 #endif
 
-#ifdef D_HEPF_INTEL
+#ifdef D_MKL
 #ifdef D_KNC
 void CheckVslError(int num) {
     switch(num) {
@@ -468,7 +468,7 @@ double* produceKNC (int brng, int seed, double p1, double p2) {
 
 #ifndef __MIC__
 void PseudoRandomGenerator::MKLArrayProducerKNC (unsigned tid) {
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	#ifdef D_KNC
 	int brng = VSL_BRNG_MT19937;
 	int errcode;
@@ -534,7 +534,7 @@ double PseudoRandomGenerator::gaussianMKLKNC (unsigned tid) {
 
 	double val;
 
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	#ifdef D_KNC
 
 	if ((first_generated_knc[tid] == false || current_prn_knc2[tid] >= (MAX_PRNS * 0.99)) && which_knc_buffer[tid] == next_knc_buffer[tid]) {
@@ -672,7 +672,7 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 
 	for (unsigned i = 0; i < number_of_threads; i++) {
 
-		// #ifdef D_HEPF_INTEL
+		// #ifdef D_MKL
 		// gpu_prns1[i] = (double*) _mm_malloc (MAX_PRNS * sizeof(double), 64);
 		// gpu_prns2[i] = (double*) _mm_malloc (MAX_PRNS * sizeof(double), 64);
 		// #else
@@ -701,7 +701,7 @@ void PseudoRandomGenerator::initialize (double param1, double param2) {
 	normal_distribution<> d (p1,p2);
 	normal = d;
 
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	vslNewStream( &mkl_stream, VSL_BRNG_MT19937, time(NULL) );
 	#endif
 	
@@ -718,54 +718,13 @@ void PseudoRandomGenerator::initialize (double param1, double param2, double see
 	for (unsigned i = 0; i < number_of_threads; i++)
 		t_rnd[i].SetSeed(seed);
 
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	vslNewStream( &mkl_stream, VSL_BRNG_MT19937, seed );
 	#endif
-
-	// mkl_prns1 = new double [MAX_PRNS];
-	// mkl_prns2 = new double [MAX_PRNS];
-
-	// #ifdef D_GPU
-	// gpu_prns1 = new double* [number_of_threads];
-	// gpu_prns2 = new double* [number_of_threads];
-
-	// // streams = new cudaStream_t [number_of_threads];
-
-	// gpu_wait_prn_request = new boost::condition_variable [number_of_threads];
-	// consumer_gpu_wait_prn = new boost::condition_variable [number_of_threads];
-
-	// current_gpu_prn = new unsigned [number_of_threads];
-
-	// wait_gpu_mt = new boost::mutex [number_of_threads];
-	// wait_for_gpu_prns = new boost::mutex [number_of_threads];
-
-	// awake_gpu = new boost::condition_variable [number_of_threads];
-
-	// which_gpu_buffer = new bool[number_of_threads];
-	// generated_gpu = new bool[number_of_threads];
-
-	// for (unsigned i = 0; i < number_of_threads; i++) {
-
-	// 	// #ifdef D_HEPF_INTEL
-	// 	// gpu_prns1[i] = (double*) _mm_malloc (MAX_PRNS * sizeof(double), 64);
-	// 	// gpu_prns2[i] = (double*) _mm_malloc (MAX_PRNS * sizeof(double), 64);
-	// 	// #else
-	// 	// gpu_prns1[i] = new double[MAX_PRNS];
-	// 	// gpu_prns2[i] = new double[MAX_PRNS];
-	// 	// #endif
-
-	// 	current_gpu_prn[i] = 0;
-
-	// 	final_time[i] = 0;
-
-	// 	which_gpu_buffer[i] = true;
-	// 	generated_gpu[i] = false;
-	// }
-	// #endif
 }
 
 PseudoRandomGenerator::~PseudoRandomGenerator (void) {
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	vslDeleteStream( &mkl_stream );
 	#endif
 
@@ -791,7 +750,7 @@ double PseudoRandomGenerator::uniformTrand (void) {
 double PseudoRandomGenerator::uniformMKL (void) {
 	double val;
 	
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, mkl_stream, 1, &val, 0.0, 1.0);
 	#else
 	val = 0.0;
@@ -806,16 +765,25 @@ double PseudoRandomGenerator::uniformPCG (void) {
 
 
 double PseudoRandomGenerator::uniform (void) {
-	switch (prng_to_use) {
-		case MKL: return uniformMKL(); break;
-		case MKLA1: return uniformMKL(); break;
-		case MKLA2: return uniformMKL(); break;
-		case MKLA3: return uniformMKL(); break;	
-		case TRandom: return uniformTrand(); break;
-		case PCG: return uniformPCG(); break;
-		case CURAND: cerr << "Uniform cuRand not yet implemented"<< endl; exit(0); break;
-		case KNC: cerr << "Uniform KNC not yet implemented"<< endl; exit(0); break;
-	}
+
+    switch (prng_to_use) {
+        case PCG: return uniformPCG(); break;
+
+        #ifdef D_MKL
+        case MKL: return uniformMKL(); break;
+        case MKLA1: return uniformMKL(); break;
+        case MKLA2: return uniformMKL(tid); break;
+        case MKLA3: return uniformMKL(); break;  
+        #elif D_ROOT
+        case TRandom: return uniformTrand(); break;
+        #elif D_GPU
+        case CURAND: cerr << "Not supported yet" << endl; exit(0); break;
+        #elif D_KNC
+        case KNC: cerr << "Not supported yet" << endl; exit(0); break;
+        #endif
+        default: cerr << "PRNG not supported - check lib compilation options are set correctly" << endl;
+                 exit(0); break;
+    }
 }
 
 void PseudoRandomGenerator::uniform2 (double *array, unsigned size) {
@@ -838,7 +806,7 @@ double* PseudoRandomGenerator::gaussianMKLArray (int size) {
 	double *val;
 	val = new double[size];
 	
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	vdRngGaussian(VSL_RNG_METHOD_GAUSSIAN_BOXMULLER, mkl_stream, size, val, p1, p2);
 	#else
 	val = NULL;
@@ -850,7 +818,7 @@ double* PseudoRandomGenerator::gaussianMKLArray (int size) {
 double PseudoRandomGenerator::gaussianMKL (void) {
 	double val;
 	
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	vdRngGaussian(VSL_RNG_METHOD_GAUSSIAN_BOXMULLER, mkl_stream, 1, &val, p1, p2);
 	#else
 	val = 0.0;
@@ -879,7 +847,7 @@ void PseudoRandomGenerator::shutdownKNC (unsigned tid) {
 }
 
 void PseudoRandomGenerator::MKLArrayProducer (void) {
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	while (!shutdown_prn) {
 
 		if (which_mkl == true){
@@ -905,7 +873,7 @@ void PseudoRandomGenerator::MKLArrayProducer (void) {
 }
 
 void PseudoRandomGenerator::MKLArrayProducerLockFree (void) {
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	double val;
 
 	while (!shutdown_prn) {
@@ -935,7 +903,7 @@ double PseudoRandomGenerator::gaussianMKLA2 (unsigned tid) {
 	double val;
 	bool last_update = false;		// not the same as which_mkl initial value
 
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	if (which_mkl == true) {
 		val = mkl_prns2[current_mkl_prns[tid]++];
 	// cout << which_mkl << ":\t" << current_mkl_prn << endl;
@@ -1226,7 +1194,6 @@ void PseudoRandomGenerator::GPUArrayProducer (void) {
 	
 	#endif
 }
-Timer tt;
 
 double PseudoRandomGenerator::gaussianGPU (void) {
 	double val;
@@ -1285,33 +1252,25 @@ double PseudoRandomGenerator::gaussianGPU (void) {
 }
 
 double PseudoRandomGenerator::gauss (unsigned tid) {
-	// return gaussianMKLA2(tid);
-	// return gaussianMKLA3();
-	// return gaussianGPU();
-	// #ifdef D_GPU
-	// return gaussianGPU2(tid);
-	// #elif D_TRAND
-	// return gaussianTrand();
-	// #else
-	// // return gaussian2();
-	// return gaussianMKL();
-	// #endif
 
-	#ifdef D_GPU
-	return gaussianGPU2(tid);
-	#elif D_KNC
-	return gaussianMKLKNC(tid);
-	#else
 	switch (prng_to_use) {
-		case MKL: return gaussianMKL(); break;
-		case MKLA1: return gaussianMKLA(); break;
-		case MKLA2: return gaussianMKLA2(tid); break;
-		case MKLA3: return gaussianMKLA3(); break;	
+        case PCG: return gaussian2(); break;
+
+        #ifdef D_MKL
+        case MKL: return gaussianMKL(); break;
+        case MKLA1: return gaussianMKLA(); break;
+        case MKLA2: return gaussianMKLA2(tid); break;
+        case MKLA3: return gaussianMKLA3(); break;  
+        #elif D_ROOT
 		case TRandom: return gaussianTrand(); break;
-		case PCG: return gaussian2(); break;
-		case CURAND: break;
+        #elif D_GPU
+        case CURAND: return gaussianGPU2(tid); break;
+        #elif D_KNC
+        case KNC: return gaussianMKLKNC(tid); break;
+        #endif
+        default: cerr << "PRNG not supported - check lib compilation options are set correctly" << endl;
+                 exit(0); break;
 	}
-	#endif
 }
 
 void PseudoRandomGenerator::setGenerator (PRNG prng) {
@@ -1322,7 +1281,7 @@ double PseudoRandomGenerator::gaussianMKLA (void) {
 	double val;
 	bool last_update = false;		// not the same as which_mkl initial value
 
-	#ifdef D_HEPF_INTEL
+	#ifdef D_MKL
 	if (which_mkl == true) {
 		get_mkl_prn.lock();
 		val = mkl_prns2[current_mkl_prn++];
@@ -1365,161 +1324,6 @@ double PseudoRandomGenerator::gaussianMKLA (void) {
 
 double PseudoRandomGenerator::gaussian (void) {
 	return normal(rnd);
-}
-
-void PseudoRandomGenerator::observe1 (unsigned td) {
-	while (!shutdown_prn) {
-		unsigned size = 0;
-		for (unsigned i = 0; i < number_of_consumer_threads; i++)
-			size += current_lfq_prn[i];
-
-		if ((float)size/(float)MAX_PRNS < 0.2) {
-			// fill lfq1
-			for (unsigned i = 0; i < MAX_PRNS; i++)
-				lfq1.push(gaussian2());
-
-			memset(current_lfq_prn, 0, number_of_consumer_threads * sizeof(unsigned));
-		} else {
-			boost::this_thread::sleep_for( boost::chrono::microseconds(500) );
-		}
-	}
-}
-
-void PseudoRandomGenerator::observe2 (unsigned td) {
-	while (!shutdown_prn) {
-		unsigned size = 0;
-		for (unsigned i = 0; i < number_of_consumer_threads; i++)
-			size += current_lfq_prn[i];
-
-		if (is_lfq1) {
-			if ((float)size/(float)MAX_PRNS < 0.2) {
-				// fill lfq2
-				for (unsigned i = 0; i < MAX_PRNS; i++)
-					lfq2.push(gaussian2());
-
-				is_lfq1 = false;
-				memset(current_lfq_prn, 0, number_of_consumer_threads * sizeof(unsigned));
-			} else {
-				boost::this_thread::sleep_for( boost::chrono::microseconds(500) );
-			}
-		} else {
-			if ((float)size/(float)MAX_PRNS < 0.2) {
-				// fill lfq1
-				for (unsigned i = 0; i < MAX_PRNS; i++)
-					lfq1.push(gaussian2());
-
-				is_lfq1 = true;
-				memset(current_lfq_prn, 0, number_of_consumer_threads * sizeof(unsigned));
-			} else {
-				boost::this_thread::sleep_for( boost::chrono::microseconds(500) );
-			}
-		}
-	}
-}
-
-void PseudoRandomGenerator::observe3 (unsigned td) {
-	while (!shutdown_prn) {
-		if (is_q1) {
-			if ((float)current_prn/(float)MAX_PRNS > 0.8) {
-				// fill array
-				for (unsigned i = 0; i < MAX_PRNS; i++)
-					_q2[i] = gaussian2();
-
-				atomic_prn.lock();
-				current_prn = 0;
-				atomic_prn.lock();
-
-				is_q1 = false;
-			} else {
-				boost::this_thread::sleep_for( boost::chrono::microseconds(500) );
-			}
-		} else {
-			if ((float)current_prn/(float)MAX_PRNS > 0.8) {
-				// fill lfq1
-				for (unsigned i = 0; i < MAX_PRNS; i++)
-					_q1[i] = gaussian2();
-
-				atomic_prn.lock();
-				current_prn = 0;
-				atomic_prn.lock();
-
-				is_q1 = true;
-			} else {
-				boost::this_thread::sleep_for( boost::chrono::microseconds(500) );
-			}
-		}
-	}
-}
-
-double PseudoRandomGenerator::consume (unsigned td, unsigned mode) {
-	double value = 0, prn;
-		
-	boost::this_thread::sleep_for( boost::chrono::microseconds(500));
-
-	for (long unsigned i = 0; i < 5000000; i++)
-		switch (mode) {
-			case 0: lfq1.pop(prn); value += prn; break;
-			case 1: if (is_lfq1)
-						lfq1.pop(prn);
-					else
-						lfq2.pop(prn);
-
-					current_lfq_prn[td]++;
-
-					value += prn; break;
-			case 2: atomic_prn.lock();
-					prn = current_prn++;
-					atomic_prn.unlock();
-
-					if (is_q1)
-						value += _q1[(unsigned)prn];
-					else
-						value += _q2[(unsigned)prn];
-					break;
-		}
-	return value;
-}
-
-void PseudoRandomGenerator::run (unsigned nthreads, unsigned mode) {
-	observer_thread = new boost::thread[number_of_threads];
-
-	switch (mode) {
-		case 0: for (unsigned tt = 0; tt < number_of_threads; tt++)
-					observer_thread[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::observe1, this, tt));
-				break;
-		case 1: for (unsigned tt = 0; tt < number_of_threads; tt++)
-					observer_thread[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::observe2, this, tt));
-				break;
-		case 2: for (unsigned tt = 0; tt < number_of_threads; tt++)
-					observer_thread[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::observe3, this, tt));
-				break;
-	}
-}
-
-void PseudoRandomGenerator::stop (void) {
-	for (unsigned tt = 0; tt < number_of_threads; tt++) {
-		observer_thread[tt].join();
-	}
-	shutdown_prn = true;
-}
-
-// for profiling purposes
-void PseudoRandomGenerator::runConsumers (unsigned nthreads, unsigned mode) {
-	consumer_thread = new boost::thread[number_of_consumer_threads];
-	current_lfq_prn = new unsigned[number_of_consumer_threads];
-
-	memset(current_lfq_prn, 0, number_of_consumer_threads * sizeof(unsigned));
-
-	for (unsigned tt = 0; tt < number_of_consumer_threads; tt++) {
-		consumer_thread[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::consume, this, tt, mode));
-	}
-}
-
-// for profiling purposes
-void PseudoRandomGenerator::stopConsumers (void) {
-	for (unsigned tt = 0; tt < number_of_consumer_threads; tt++) {
-		consumer_thread[tt].join();
-	}
 }
 
 // using box muller from ROOT
