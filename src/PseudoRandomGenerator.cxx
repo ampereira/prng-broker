@@ -608,10 +608,14 @@ PseudoRandomGenerator::PseudoRandomGenerator (void) {
 void PseudoRandomGenerator::init (unsigned num_threads) {
 	number_of_threads = num_threads;
 
+    #ifdef D_ROOT
 	t_rnd = new TRandom3 [number_of_threads];
+    #endif
+
+
 	current_mkl_prns = new int [number_of_threads];
 
-	int c = ((double)MAX_PRNS/(double)number_of_threads);
+	// int c = ((double)MAX_PRNS/(double)number_of_threads);
 	// cout << "chegou " << c << "\t" << number_of_threads << endl;
 
 	// for (unsigned i = 0; i < number_of_threads; i++) {
@@ -715,8 +719,11 @@ void PseudoRandomGenerator::initialize (double param1, double param2, double see
 	normal_distribution<> d (p1,p2);
 	normal = d;
 
-	for (unsigned i = 0; i < number_of_threads; i++)
-		t_rnd[i].SetSeed(seed);
+	for (unsigned i = 0; i < number_of_threads; i++) {
+        #ifdef D_ROOT
+		t_rnd[i].SetSeed(seed + i);
+        #endif
+    }
 
 	#ifdef D_MKL
 	vslNewStream( &mkl_stream, VSL_BRNG_MT19937, seed );
@@ -744,7 +751,12 @@ double PseudoRandomGenerator::uniformTrand (void) {
 	_this_thread_id = 0;
 	#endif
 
+    #ifdef D_ROOT
 	return t_rnd[_this_thread_id].Rndm();
+    #else
+    cerr << "uniformTrand not supported"<< endl;
+    exit(0);
+    #endif
 }
 
 double PseudoRandomGenerator::uniformMKL (void) {
@@ -772,13 +784,16 @@ double PseudoRandomGenerator::uniform (void) {
         #ifdef D_MKL
         case MKL: return uniformMKL(); break;
         case MKLA1: return uniformMKL(); break;
-        case MKLA2: return uniformMKL(tid); break;
+        case MKLA2: return uniformMKL(); break;
         case MKLA3: return uniformMKL(); break;  
-        #elif D_ROOT
+        #endif
+        #ifdef D_ROOT
         case TRandom: return uniformTrand(); break;
-        #elif D_GPU
+        #endif
+        #ifdef D_GPU
         case CURAND: cerr << "Not supported yet" << endl; exit(0); break;
-        #elif D_KNC
+        #endif
+        #ifdef D_KNC
         case KNC: cerr << "Not supported yet" << endl; exit(0); break;
         #endif
         default: cerr << "PRNG not supported - check lib compilation options are set correctly" << endl;
@@ -799,7 +814,12 @@ double PseudoRandomGenerator::gaussianTrand (void) {
 	_this_thread_id = 0;
 	#endif
 
+    #ifdef D_ROOT
 	return t_rnd[_this_thread_id].Gaus(p1, p2);
+    #else
+    cerr << "gaussianTrand not supported"<< endl;
+    exit(0);
+    #endif
 }
 
 double* PseudoRandomGenerator::gaussianMKLArray (int size) {
@@ -901,9 +921,10 @@ double PseudoRandomGenerator::gaussianMKLA3 (void) {
 // array positions not shared among threads
 double PseudoRandomGenerator::gaussianMKLA2 (unsigned tid) {
 	double val;
+
+    #ifdef D_MKL
 	bool last_update = false;		// not the same as which_mkl initial value
 
-	#ifdef D_MKL
 	if (which_mkl == true) {
 		val = mkl_prns2[current_mkl_prns[tid]++];
 	// cout << which_mkl << ":\t" << current_mkl_prn << endl;
@@ -1053,9 +1074,9 @@ void PseudoRandomGenerator::GPUArrayProducer2 (unsigned tid) {
 
 double PseudoRandomGenerator::gaussianGPU2 (unsigned tid) {
 	double val;
-	unsigned current;
 
 	#ifdef D_GPU
+    unsigned current;
 
 	if (!generated_gpu[tid]) {
 		{
@@ -1197,9 +1218,9 @@ void PseudoRandomGenerator::GPUArrayProducer (void) {
 
 double PseudoRandomGenerator::gaussianGPU (void) {
 	double val;
-	unsigned current;
 
 	#ifdef D_GPU
+    unsigned current;
 
 	if (which_mkl == true) {
 		get_mkl_prn.lock();
@@ -1260,12 +1281,15 @@ double PseudoRandomGenerator::gauss (unsigned tid) {
         case MKL: return gaussianMKL(); break;
         case MKLA1: return gaussianMKLA(); break;
         case MKLA2: return gaussianMKLA2(tid); break;
-        case MKLA3: return gaussianMKLA3(); break;  
-        #elif D_ROOT
+        case MKLA3: return gaussianMKLA3(); break;
+        #endif
+        #ifdef D_ROOT
 		case TRandom: return gaussianTrand(); break;
-        #elif D_GPU
+        #endif
+        #ifdef D_GPU
         case CURAND: return gaussianGPU2(tid); break;
-        #elif D_KNC
+        #endif
+        #ifdef D_KNC
         case KNC: return gaussianMKLKNC(tid); break;
         #endif
         default: cerr << "PRNG not supported - check lib compilation options are set correctly" << endl;
@@ -1279,9 +1303,10 @@ void PseudoRandomGenerator::setGenerator (PRNG prng) {
 
 double PseudoRandomGenerator::gaussianMKLA (void) {
 	double val;
-	bool last_update = false;		// not the same as which_mkl initial value
 
 	#ifdef D_MKL
+    bool last_update = false;       // not the same as which_mkl initial value
+
 	if (which_mkl == true) {
 		get_mkl_prn.lock();
 		val = mkl_prns2[current_mkl_prn++];

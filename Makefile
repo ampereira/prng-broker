@@ -10,7 +10,7 @@ DEFINES =
 
 LIB_NAME = libPrngManager
 
-ifeq ($(HEPF_INTEL),yes)
+ifeq ($(PRNGM_INTEL),yes)
 CXX = icpc  -DD_HEPF_INTEL -qopenmp
 LD  = icpc  -DD_HEPF_INTEL -qopenmp
 else
@@ -20,14 +20,14 @@ endif
 
 SUFFIX=lib
 
-#-Wno-unused-parameter -Wno-unused-variable -Wno-uninitialized -Wno-maybe-uninitialized -Wno-return-type -Wno-unused-but-set-parameter -Wno-missing-field-initializers -Wno-sign-compare -Wno-deprecated-declarations
+#-Wno-unused-parameter   -Wno-maybe-uninitialized -Wno-return-type -Wno-unused-but-set-parameter  -Wno-sign-compare -Wno-deprecated-declarations
 
-CXXFLAGS   = -DD_VERBOSE -Wall -Wextra -std=c++0x -DD_MULTICORE -DD_REPORT -lboost_thread 
-
+CXXFLAGS   = -DD_VERBOSE -Wall -Wextra -std=c++0x -DD_MULTICORE -DD_REPORT -lboost_thread -Wno-unused-parameter -Wno-uninitialized -Wno-unused-variable -Wno-missing-field-initializers -Wno-unused-but-set-parameter 
+INCLUDES = -I/src/ 
 
 KNC_FLAGS= -Wall
 
-ifeq ($(HEPF_INTEL),yes)
+ifeq ($(PRNGM_INTEL),yes)
 	CXXFLAGS += -DD_MKL
 	OTHER_LIBS += -mkl=parallel -lmkl_blas95_lp64 -lmkl_lapack95_lp64 -lmkl_intel_lp64 -lmkl_sequential -lmkl_core 
 endif
@@ -36,12 +36,13 @@ DIR=$(shell pwd)
 DIR=${$DIR%$SUFFIX}
 
 
-ifeq ($(HEPF_ROOT),yes)
+ifeq ($(PRNGM_ROOT),yes)
 	ROOTCFLAGS = $(shell root-config --cflags)
 	ROOTGLIBSAUX  = $(shell root-config --glibs)
 	GPU_ROOTGLIBS= --compiler-options " $(subst -limf,, $(ROOTGLIBSAUX)) "
 	ROOTGLIBS=$(subst -limf,, $(ROOTGLIBSAUX))
 	CXXFLAGS += -DD_ROOT $(ROOTCFLAGS)
+	INCLUDES += -I$(ROOTSYS)/include
 endif
 
 UNAME_S := $(shell uname -s)
@@ -49,12 +50,12 @@ ifeq ($(UNAME_S),Darwin)
 	CXXFLAGS+= -Wno-unused-command-line-argument
 endif
 
-ifeq ($(HEPF_KNC),yes)
+ifeq ($(PRNGM_KNC),yes)
 	KNC_FLAGS += -DD_KNC -I${MKLROOT}/include -offload-option,mic,compiler," -L${MKLROOT}/lib/mic -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core"
 endif
 
-ifeq ($(HEPF_MPI),yes)
-	ifeq ($(HEPF_INTEL),yes)
+ifeq ($(PRNGM_MPI),yes)
+	ifeq ($(PRNGM_INTEL),yes)
 		CXX = mpiicpc -DD_HEPF_INTEL
 		LD  = mpiicpc -DD_HEPF_INTEL
 		CXXFLAGS += -DD_MPI
@@ -66,20 +67,17 @@ ifeq ($(HEPF_MPI),yes)
 endif
 
 
-ifeq ($(HEPF_DEBUG),yes)
+ifeq ($(PRNGM_DEBUG),yes)
 	CXXFLAGS += -g
 else
 	CXXFLAGS += -O3
 endif
 
 ifeq ($(strip $(BOOST_DIR)),)
-	INCLUDES = -I$(ROOTSYS)/include
-
-
 	# GPU OFFLOAD
-	ifeq ($(HEPF_GPU),yes)
+	ifeq ($(PRNGM_GPU),yes)
 		KNC_FLAGS=-DD_LOL
-		ifeq ($(HEPF_MPI),yes)
+		ifeq ($(PRNGM_MPI),yes)
 			INCLUDES = -I$(ROOTSYS)/include
 			CXX = nvcc $(INCLUDES) $(GPULIBS) -c -O3 -lcurand -ccbin=mpiicpc --compiler-options "
 			LD = nvcc $(INCLUDES) $(GPULIBS) -O3 -lcurand -ccbin=mpiicpc --compiler-options "
@@ -96,15 +94,15 @@ ifeq ($(strip $(BOOST_DIR)),)
 		endif
 	endif
 else
-	INCLUDES = -I$(ROOTSYS)/include -I$(BOOST_DIR)/include
+	INCLUDES += -I$(BOOST_DIR)/include
 	LIBS = -L$(BOOST_DIR)/lib
 	GPULIBS = -L$(BOOST_DIR)/lib
 
-# 	# GPU OFFLOAD
+	# 	# GPU OFFLOAD
 	
-	ifeq ($(HEPF_GPU),yes)
+	ifeq ($(PRNGM_GPU),yes)
 		KNC_FLAGS=-DD_LOL
-		ifeq ($(HEPF_MPI),yes)
+		ifeq ($(PRNGM_MPI),yes)
 			CXX = nvcc $(INCLUDES) $(GPULIBS) -c -O3 -lcurand -ccbin=mpiicpc --compiler-options "
 			LD = nvcc $(INCLUDES) $(GPULIBS) -O3 -lcurand -ccbin=mpiicpc --compiler-options "
 			CXXFLAGS += -DD_GPU -DD_HEPF_INTEL -DD_MPI

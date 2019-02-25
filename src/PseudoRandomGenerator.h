@@ -4,7 +4,6 @@
 #ifndef __MIC__
 
 	#include <cstdlib>
-	#include <TRandom3.h>
 	#include <random>
 	#include <string>
 	#include <boost/lexical_cast.hpp>
@@ -22,6 +21,10 @@
 	#include <mkl_vsl.h>
 	#include <malloc.h>
 	#include <stdio.h>
+#endif
+
+#ifdef D_ROOT
+	#include <TRandom3.h>
 #endif
 
 #ifdef D_GPU
@@ -65,15 +68,18 @@ class PseudoRandomGenerator {
 
 	bool first_generated = false;
 
-	TRandom3 *t_rnd;	// one per thread, Mersenne Twister
+
 	pcg64_fast rnd; //(pcg_extras::seed_seq_from<std::random_device>{});
 	pcg64_k32_fast rnd64;
 
 	#ifdef D_HEPF_INTEL
 	VSLStreamStatePtr mkl_stream;
 	#endif
+	#ifdef D_ROOT
+	TRandom3 *t_rnd;	// one per thread, Mersenne Twister
+	#endif
 
-	PRNG prng_to_use = PRNG::TRandom;
+	PRNG prng_to_use = PRNG::PCG;
 
 	unsigned number_of_threads;
 	unsigned number_of_consumer_threads;
@@ -118,12 +124,12 @@ class PseudoRandomGenerator {
 	long long unsigned final_time[50];
 	#endif
 
-	void observe1 (unsigned td);
-	void observe2 (unsigned td); 
-	void observe3 (unsigned td);
-	// for profiling purposes
-	double consume (unsigned td, unsigned mode);
-	boost::mutex atomic_prn;
+	// void observe1 (unsigned td);
+	// void observe2 (unsigned td); 
+	// void observe3 (unsigned td);
+	// // for profiling purposes
+	// double consume (unsigned td, unsigned mode);
+	// boost::mutex atomic_prn;
 
 
 
@@ -175,8 +181,8 @@ public:
 	void run (unsigned nthreads, unsigned mode);
 	void stop (void);
 	// for profiling purposes
-	void runConsumers (unsigned nthreads, unsigned mode);
-	void stopConsumers (void);
+	// void runConsumers (unsigned nthreads, unsigned mode);
+	// void stopConsumers (void);
 	void shutdownGPU (void);
 	void reportGPU (void);
 
