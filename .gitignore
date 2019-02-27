@@ -2,3 +2,5 @@
 .DS_Store
 test.cxx
 ._*
+build
+bin
