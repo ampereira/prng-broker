@@ -48,7 +48,7 @@
 
 
 enum Distribution {uniform, gaussian};
-enum PRNG {MKL, MKLA1, MKLA2, MKLA3, TRandom, PCG, CURAND, KNC};
+enum PRNG {STL, MKL, MKLA1, MKLA2, MKLA3, TRandom, PCG, CURAND, KNC};
 
 
 
@@ -63,14 +63,15 @@ class PseudoRandomGenerator {
 	bool generated_mkl = true;
 	bool generate_mkl = false;
     bool shutdown_prn = false;
-
 	bool last_update = false;
-
 	bool first_generated = false;
 
 
 	pcg64_fast rnd; //(pcg_extras::seed_seq_from<std::random_device>{});
 	pcg64_k32_fast rnd64;
+
+    mt19937 *mt64c;
+    uniform_real_distribution<double> dis;
 
 	#ifdef D_HEPF_INTEL
 	VSLStreamStatePtr mkl_stream;
@@ -79,7 +80,7 @@ class PseudoRandomGenerator {
 	TRandom3 *t_rnd;	// one per thread, Mersenne Twister
 	#endif
 
-	PRNG prng_to_use = PRNG::PCG;
+	PRNG prng_to_use = PRNG::STL;
 
 	unsigned number_of_threads;
 	unsigned number_of_consumer_threads;
@@ -186,9 +187,10 @@ public:
 	void shutdownGPU (void);
 	void reportGPU (void);
 
+	double uniformeSTL (void);
+	double gaussianSTL (void);
 	void setGenerator(PRNG prng);
 	double gaussianMKLKNC (unsigned tid);
-public:
 	void MKLArrayProducerKNC(unsigned tid);
 };
 

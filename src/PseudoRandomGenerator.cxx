@@ -615,6 +615,8 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 
 	current_mkl_prns = new int [number_of_threads];
 
+	mt64c = new mt19937[number_of_threads];
+
 	// int c = ((double)MAX_PRNS/(double)number_of_threads);
 	// cout << "chegou " << c << "\t" << number_of_threads << endl;
 
@@ -702,8 +704,11 @@ void PseudoRandomGenerator::initialize (double param1, double param2) {
 	p1 = param1;
 	p2 = param2;
 
+
 	normal_distribution<> d (p1,p2);
+    uniform_real_distribution<double> ddis (p1,p2);
 	normal = d;
+    dis = ddis;
 
 	#ifdef D_MKL
 	vslNewStream( &mkl_stream, VSL_BRNG_MT19937, time(NULL) );
@@ -717,12 +722,15 @@ void PseudoRandomGenerator::initialize (double param1, double param2, double see
 	p2 = param2;
 
 	normal_distribution<> d (p1,p2);
+    uniform_real_distribution<double> ddis (p1,p2);
 	normal = d;
+    dis = ddis;
 
 	for (unsigned i = 0; i < number_of_threads; i++) {
         #ifdef D_ROOT
 		t_rnd[i].SetSeed(seed + i);
         #endif
+    	mt64c[i].seed(seed);
     }
 
 	#ifdef D_MKL
@@ -742,6 +750,24 @@ PseudoRandomGenerator::~PseudoRandomGenerator (void) {
 	}
 	delete mkl_prns1;
 	delete mkl_prns2;
+}
+
+double PseudoRandomGenerator::uniformeSTL (void) {
+	string threadId = boost::lexical_cast<std::string>(boost::this_thread::get_id());
+	unsigned _this_thread_id = thread_ids.find(threadId)->second;
+
+    double value = dis(mt64c[_this_thread_id]);
+
+    return value;
+}
+
+double PseudoRandomGenerator::gaussianSTL (void) {
+	string threadId = boost::lexical_cast<std::string>(boost::this_thread::get_id());
+	unsigned _this_thread_id = thread_ids.find(threadId)->second;
+
+    double value = normal(mt64c[_this_thread_id]);
+
+    return value;
 }
 
 double PseudoRandomGenerator::uniformTrand (void) {
@@ -779,6 +805,7 @@ double PseudoRandomGenerator::uniformPCG (void) {
 double PseudoRandomGenerator::uniform (void) {
 
     switch (prng_to_use) {
+    	case STL: return uniformeSTL(); break;
         case PCG: return uniformPCG(); break;
 
         #ifdef D_MKL
@@ -1275,6 +1302,7 @@ double PseudoRandomGenerator::gaussianGPU (void) {
 double PseudoRandomGenerator::gauss (unsigned tid) {
 
 	switch (prng_to_use) {
+		case STL: gaussianSTL(); break;
         case PCG: return gaussian2(); break;
 
         #ifdef D_MKL
