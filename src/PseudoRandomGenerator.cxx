@@ -614,19 +614,14 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 
 
 	current_mkl_prns = new int [number_of_threads];
+	uniform_current_mkl_prns = new int [number_of_threads];
 
 	mt64c = new mt19937[number_of_threads];
 
-	// int c = ((double)MAX_PRNS/(double)number_of_threads);
-	// cout << "chegou " << c << "\t" << number_of_threads << endl;
-
-	// for (unsigned i = 0; i < number_of_threads; i++) {
-	// 	current_mkl_prns[i] = i * c;
-	// 	// cout << "Thread " << i << ":\t" << current_mkl_prns[i] << endl;
-	// }
-
 	mkl_prns1 = new double [MAX_PRNS];
 	mkl_prns2 = new double [MAX_PRNS];
+	uniform_mkl_prns1 = new double [MAX_PRNS];
+	uniform_mkl_prns2 = new double [MAX_PRNS];
 
 	#ifdef D_KNC
 	wait_prns_mt = new boost::mutex [number_of_threads];
@@ -712,6 +707,7 @@ void PseudoRandomGenerator::initialize (double param1, double param2) {
 
 	#ifdef D_MKL
 	vslNewStream( &mkl_stream, VSL_BRNG_MT19937, time(NULL) );
+	vslNewStream( &uniform_mkl_stream, VSL_BRNG_MT19937, time(NULL) );
 	#endif
 	
 }
@@ -735,6 +731,7 @@ void PseudoRandomGenerator::initialize (double param1, double param2, double see
 
 	#ifdef D_MKL
 	vslNewStream( &mkl_stream, VSL_BRNG_MT19937, seed );
+	vslNewStream( &uniform_mkl_stream, VSL_BRNG_MT19937, seed );
 	#endif
 }
 
@@ -789,9 +786,22 @@ double PseudoRandomGenerator::uniformMKL (void) {
 	double val;
 	
 	#ifdef D_MKL
-	vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, mkl_stream, 1, &val, 0.0, 1.0);
+	vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, 1, &val, 0.0, 1.0);
 	#else
 	val = 0.0;
+	#endif
+
+	return val;
+}
+
+double* PseudoRandomGenerator::uniformMKLArray (int size) {
+	double *val;
+	val = new double[size];
+	
+	#ifdef D_MKL
+	vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, size, val, 0.0, 1.0);
+	#else
+	val = NULL;
 	#endif
 
 	return val;
@@ -802,7 +812,7 @@ double PseudoRandomGenerator::uniformPCG (void) {
 }
 
 
-double PseudoRandomGenerator::uniform (void) {
+double PseudoRandomGenerator::uniform (unsigned tid) {
 
     switch (prng_to_use) {
     	case STL: return uniformeSTL(); break;
@@ -810,9 +820,9 @@ double PseudoRandomGenerator::uniform (void) {
 
         #ifdef D_MKL
         case MKL: return uniformMKL(); break;
-        case MKLA1: return uniformMKL(); break;
-        case MKLA2: return uniformMKL(); break;
-        case MKLA3: return uniformMKL(); break;  
+        case MKLA1: return uniformMKLA(tid); break;
+        case MKLA2: return uniformMKLA(tid); break;
+        case MKLA3: return uniformMKLA(tid); break;  
         #endif
         #ifdef D_ROOT
         case TRandom: return uniformTrand(); break;
@@ -891,6 +901,89 @@ void PseudoRandomGenerator::shutdownKNC (unsigned tid) {
 		wait_knc_produce[tid].notify_all();
 	}
 	#endif
+}
+
+void PseudoRandomGenerator::MKLArrayProducerUniformDB (void) {
+}
+
+void PseudoRandomGenerator::MKLArrayProducerUniform (void) {
+	#ifdef D_MKL
+	while (!shutdown_prn) {
+
+		if (uniform_which_mkl == true){
+			// generate_mkl = true;
+			vdRngGaussian(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns1, p1, p2);
+			uniform_current_prn = 0;
+			// cout << endl<<"GEROU PRNS1" << endl << endl;
+		} else {
+			// generate_mkl = true;
+			vdRngGaussian(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns2, p1, p2);
+			uniform_current_prn = 0;
+			// cout << endl<<"GEROU PRNS2" << endl << endl;
+		}
+
+		uniform_generated_mkl = true;
+
+		{
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_mkl_mt);
+			uniform_wait_mkl.wait(_lock);
+		}
+	}
+	#endif
+}
+
+double PseudoRandomGenerator::uniformMKLA (unsigned tid) {
+	double val;
+
+    #ifdef D_MKL
+	bool last_update = false;		// not the same as which_mkl initial value
+
+	if (uniform_which_mkl == true) {
+		val = uniform_mkl_prns2[uniform_current_mkl_prns[tid]++];
+
+		if ((uniform_current_mkl_prns[tid] == (MAX_PRNS * 0.9))){
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_mkl_mt);
+			uniform_wait_mkl.notify_all();
+			last_update = uniform_which_mkl;
+			uniform_generate_mkl = true;
+			uniform_generated_mkl = false;
+		}
+
+		uniform_get_mkl_prn.lock();
+		if (uniform_current_mkl_prns[tid] >= MAX_PRNS && uniform_generated_mkl) {
+			uniform_generate_mkl = false;
+			uniform_which_mkl = 1 - uniform_which_mkl;
+
+			int c = ((double)MAX_PRNS/(double)number_of_threads);
+			for (unsigned i = 0; i < number_of_threads; i++)
+				uniform_current_mkl_prns[i] = i * c;
+		}
+
+		uniform_get_mkl_prn.unlock();
+	} else {
+		val = uniform_mkl_prns1[uniform_current_mkl_prns[tid]++];
+
+		if ((uniform_current_mkl_prns[tid] == (MAX_PRNS * 0.9))) {
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_mkl_mt);
+			uniform_wait_mkl.notify_all();
+			last_update = uniform_which_mkl;
+		}
+
+		uniform_get_mkl_prn.lock();
+		if (uniform_current_mkl_prns[tid] == MAX_PRNS && uniform_generated_mkl) {	
+			uniform_generate_mkl = false;
+			uniform_which_mkl = 1 - uniform_which_mkl;
+
+			int c = ((double)MAX_PRNS/(double)number_of_threads);
+			for (unsigned i = 0; i < number_of_threads; i++)
+				uniform_current_mkl_prns[i] = i * c;
+		}
+
+		uniform_get_mkl_prn.unlock();
+	}
+	#endif
+
+	return val;
 }
 
 void PseudoRandomGenerator::MKLArrayProducer (void) {
@@ -1099,6 +1192,152 @@ void PseudoRandomGenerator::GPUArrayProducer2 (unsigned tid) {
 	#endif
 }
 
+void PseudoRandomGenerator::uniformGPUArrayProducer2 (unsigned tid) {
+	#ifdef D_GPU
+
+	#ifdef D_AFFINITY
+	cpu_set_t cpuset;
+	CPU_ZERO( & cpuset);
+	CPU_SET( tid+boost::thread::physical_concurrency(), & cpuset);
+
+	int erro(::pthread_setaffinity_np( ::pthread_self(), sizeof( cpuset), & cpuset));
+	#endif
+
+
+	size_t i;
+
+	curandGenerator_t gens;
+	double *devData;
+	double *data;
+	bool which_mkl_gen = true;
+
+	/* Allocate n floats on device */
+	CUDA_CALL(cudaMalloc((void **)&devData, MAX_PRNS*sizeof(double)));
+
+	/* Create pseudo-random number generator */
+	CURAND_CALL(curandCreateGenerator(&gens, CURAND_RNG_PSEUDO_DEFAULT));
+	CUDA_CALL(cudaStreamCreate(&streams[tid]));
+
+	// set specific stream for this thread
+	CURAND_CALL(curandSetStream(gens, streams[tid]));
+
+	while (!shutdown_prn) {
+
+		// CURAND_CALL(curandGenerateNormalDouble(gens[tid], devData, MAX_PRNS, p1, p2));
+		CURAND_CALL(curandGenerateUniformDouble(gens, devData, MAX_PRNS));
+		
+		cudaMallocHost(&data, MAX_PRNS*sizeof(double));
+
+		// cout << endl << endl << "CHEGOU1 "<< tid << endl << endl;
+
+		if (which_mkl_gen == true){
+			cudaFreeHost(uniform_gpu_prns1[tid]);
+			/* Copy device memory to host */
+			CUDA_CALL(cudaMemcpyAsync(data, devData, MAX_PRNS * sizeof(double), cudaMemcpyDeviceToHost, streams[tid]));
+			
+
+			CUDA_CALL(cudaStreamSynchronize(streams[tid]));
+
+			uniform_gpu_prns1[tid] = data;
+
+			// cout << endl << endl << "gerou prns1\t"<< tid << endl << endl;
+			which_mkl_gen = false;
+		} else {
+			cudaFreeHost(uniform_gpu_prns2[tid]);
+			/* Copy device memory to host */
+			CUDA_CALL(cudaMemcpyAsync(data, devData, MAX_PRNS * sizeof(double), cudaMemcpyDeviceToHost, streams[tid]));
+			
+
+			CUDA_CALL(cudaStreamSynchronize(streams[tid]));
+
+			uniform_gpu_prns2[tid] = data;
+
+			// cout << endl << endl << "gerou prns2\t"<< tid << endl << endl;
+			which_mkl_gen = true;
+		}
+
+		// cout << endl << endl << "CHEGOU3 "<< tid << endl << endl;
+
+		uniform_generated_gpu[tid] = true;
+
+		{
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_for_gpu_prns[tid]);
+			uniform_consumer_gpu_wait_prn[tid].notify_all();
+		}
+
+		{
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_gpu_mt[tid]);
+			uniform_gpu_wait_prn_request[tid].wait(_lock);
+			uniform_generated_gpu[tid] = false;
+		}
+	}
+
+	/* Cleanup */
+	CURAND_CALL(curandDestroyGenerator(gens));
+	CUDA_CALL(cudaFree(devData));
+	
+	#endif
+}
+
+double PseudoRandomGenerator::uniformGPU2 (unsigned tid) {
+	double val;
+
+	#ifdef D_GPU
+    unsigned current;
+
+	if (!uniform_generated_gpu[tid]) {
+		{
+			// gettimeofday(&t[tid], NULL);
+			// long long unsigned initial_time = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
+			
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_for_gpu_prns[tid]);
+			uniform_consumer_gpu_wait_prn[tid].wait(_lock);
+
+			// gettimeofday(&t[tid], NULL);
+			// final_time[tid] = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
+		}
+	}
+
+	if (uniform_current_gpu_prn[tid] == 0){
+		// cout << "a acabar prn2\t" << tid << endl;
+
+		boost::unique_lock<boost::mutex> _lock (uniform_wait_gpu_mt[tid]);
+		uniform_gpu_wait_prn_request[tid].notify_all();
+	}
+
+	// cout << "chegou" << endl;
+
+	if (uniform_which_gpu_buffer[tid] == true) {
+		uniform_current_gpu_prn[tid]++;
+
+		if (uniform_current_gpu_prn[tid] == MAX_PRNS-1) {	
+			uniform_which_gpu_buffer[tid] = 1 - uniform_which_gpu_buffer[tid];
+			uniform_current_gpu_prn[tid] = 0;
+
+			// cout << "acabou prn1\t" << tid << endl;
+		}
+
+
+		val = uniform_gpu_prns1[tid][current];
+
+	} else {
+		uniform_current_gpu_prn[tid]++;
+
+
+		if (uniform_current_gpu_prn[tid] == MAX_PRNS-1) {	
+			uniform_which_gpu_buffer[tid] = 1 - uniform_which_gpu_buffer[tid];
+			uniform_current_gpu_prn[tid] = 0;
+			// cout << "acabou prn2\t" << tid << endl;
+		}
+
+		val = uniform_gpu_prns2[tid][current];
+	}
+
+	#endif
+
+	return val;
+}
+
 double PseudoRandomGenerator::gaussianGPU2 (unsigned tid) {
 	double val;
 
@@ -1107,14 +1346,14 @@ double PseudoRandomGenerator::gaussianGPU2 (unsigned tid) {
 
 	if (!generated_gpu[tid]) {
 		{
-			gettimeofday(&t[tid], NULL);
-			long long unsigned initial_time = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
+			// gettimeofday(&t[tid], NULL);
+			// long long unsigned initial_time = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
 			
 			boost::unique_lock<boost::mutex> _lock (wait_for_gpu_prns[tid]);
 			consumer_gpu_wait_prn[tid].wait(_lock);
 
-			gettimeofday(&t[tid], NULL);
-			final_time[tid] = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
+			// gettimeofday(&t[tid], NULL);
+			// final_time[tid] = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
 		}
 	}
 
@@ -1412,7 +1651,7 @@ double PseudoRandomGenerator::gaussian2 (void) {
    double rn,x,y,z;
 
    do {
-      y = uniform();
+      y = uniform(0);
 
       if (y>kHm1) {
          result = kHp*y-kHp1; break; }
@@ -1424,7 +1663,7 @@ double PseudoRandomGenerator::gaussian2 (void) {
       }
 
       else if (y<kHm) {
-         rn = uniform();
+         rn = uniform(0);
          rn = rn-1+rn;
          z = (rn>0) ? 2-rn : -2-rn;
          if ((kC1-y)*(kC3+abs(z))<kC2) {
@@ -1441,8 +1680,8 @@ double PseudoRandomGenerator::gaussian2 (void) {
       }
 
       while (1) {
-         x = uniform();
-         y = kYm * uniform();
+         x = uniform(0);
+         y = kYm * uniform(0);
          z = kX0 - kS*x - y;
          if (z>0)
             rn = 2+y/x;

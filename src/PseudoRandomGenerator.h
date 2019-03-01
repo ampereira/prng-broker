@@ -56,12 +56,12 @@ using namespace std;
 
 // only works for doubles atm
 class PseudoRandomGenerator {
-	bool which_mkl = true;
-	double *mkl_prns1, *mkl_prns2;
+	bool which_mkl = true, uniform_which_mkl = true;
+	double *mkl_prns1, *mkl_prns2, *uniform_mkl_prns1, *uniform_mkl_prns2;
 	double p1, p2;
-    unsigned current_prn = 0;
-	bool generated_mkl = true;
-	bool generate_mkl = false;
+    unsigned current_prn = 0, uniform_current_prn = 0;
+	bool generated_mkl = true, uniform_generated_mkl = true;
+	bool generate_mkl = false, uniform_generate_mkl = false;
     bool shutdown_prn = false;
 	bool last_update = false;
 	bool first_generated = false;
@@ -74,7 +74,7 @@ class PseudoRandomGenerator {
     uniform_real_distribution<double> dis;
 
 	#ifdef D_HEPF_INTEL
-	VSLStreamStatePtr mkl_stream;
+	VSLStreamStatePtr mkl_stream, uniform_mkl_stream;
 	#endif
 	#ifdef D_ROOT
 	TRandom3 *t_rnd;	// one per thread, Mersenne Twister
@@ -83,12 +83,9 @@ class PseudoRandomGenerator {
 	PRNG prng_to_use = PRNG::STL;
 
 	unsigned number_of_threads;
-	unsigned number_of_consumer_threads;
-	boost::thread *observer_thread = NULL;
-	boost::thread *consumer_thread = NULL;
 	boost::thread mkl_producer;
-	boost::mutex get_mkl_prn, wait_mkl_mt;	// find better solution. atomic?
-	boost::condition_variable wait_mkl;
+	boost::mutex get_mkl_prn, wait_mkl_mt, uniform_get_mkl_prn, uniform_wait_mkl_mt;	// find better solution. atomic?
+	boost::condition_variable wait_mkl, uniform_wait_mkl;
 
 	#ifdef D_KNC
 	boost::mutex *wait_prns_mt, *wait_knc_produce_mt;
@@ -105,21 +102,24 @@ class PseudoRandomGenerator {
 	normal_distribution<> normal;
 
 	int current_mkl_prn = 0;
+	int uniform_current_mkl_prn = 0;
 	int *current_mkl_prns;	// for mkla2
+	int *uniform_current_mkl_prns;	// for mkla2
 	bool last_gpu_update = false;		// not the same as which_mkl initial value
 
 	double **gpu_prns1, **gpu_prns2;
+	double **uniform_gpu_prns1, **uniform_gpu_prns2;
 
 
 	#ifdef D_GPU
 	cudaStream_t streams[32];
-	boost::condition_variable *gpu_wait_prn_request;	// one per thread
-	unsigned *current_gpu_prn;	// for mkla2
-	boost::mutex *wait_gpu_mt, *wait_for_gpu_prns;
+	boost::condition_variable *gpu_wait_prn_request, *uniform_gpu_wait_prn_request;	// one per thread
+	unsigned *current_gpu_prn, *uniform_current_gpu_prn;	// for mkla2
+	boost::mutex *wait_gpu_mt, *wait_for_gpu_prns, *uniform_wait_gpu_mt, *uniform_wait_for_gpu_prns;
 	boost::condition_variable *awake_gpu;
-	bool *which_gpu_buffer;
-	bool *generated_gpu;
-	boost::condition_variable *consumer_gpu_wait_prn;
+	bool *which_gpu_buffer, *uniform_which_gpu_buffer;
+	bool *generated_gpu, *uniform_generated_gpu;
+	boost::condition_variable *consumer_gpu_wait_prn, *uniform_consumer_gpu_wait_prn;
 
 	timeval t[50];
 	long long unsigned final_time[50];
@@ -156,7 +156,7 @@ public:
 	void initialize (double param1, double param2);
 	void initialize (double param1, double param2, double seed);
 	double uniformTrand (void);
-	double uniform (void);
+	double uniform (unsigned tid);
 	double uniformPCG (void);
 	double uniformMKL (void);
 	void uniform2 (double *array, unsigned size);
@@ -187,11 +187,17 @@ public:
 	void shutdownGPU (void);
 	void reportGPU (void);
 
+	double *uniformMKLArray (int size);
 	double uniformeSTL (void);
 	double gaussianSTL (void);
 	void setGenerator(PRNG prng);
 	double gaussianMKLKNC (unsigned tid);
 	void MKLArrayProducerKNC(unsigned tid);
+	void MKLArrayProducerUniformDB (void);
+	void MKLArrayProducerUniform (void);
+	double uniformMKLA (unsigned tid);
+	void uniformGPUArrayProducer2 (unsigned tid);
+	double uniformGPU2 (unsigned tid);
 };
 
 #endif
