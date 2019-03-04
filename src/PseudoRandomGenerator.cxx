@@ -435,7 +435,7 @@ void CheckVslError(int num) {
 
 double* produceKNC (int brng, int seed, double p1, double p2) {
 	
-	int method = VSL_RNG_METHOD_GAUSSIAN_BOXMULLER;
+	int method = VSL_RNG_METHOD_UNIFORM_STD;
 	int errcode1=-1, errcode2=-1, errcode3=-1;
 
     double *knc_prn_buffer = new double [MAX_PRNS];
@@ -449,7 +449,7 @@ double* produceKNC (int brng, int seed, double p1, double p2) {
 		//    CheckVslError( errcode );
 
 		/***** Call RNG *****/
-		errcode2 = vdRngGaussian( method, stream2, MAX_PRNS, knc_prn_buffer, p1, p2 );
+		errcode2 = vdRngGaussian( method, stream2, MAX_PRNS, knc_prn_buffer );
 		//   CheckVslError( errcode );
 
 		/***** Deinitialize *****/
@@ -462,6 +462,37 @@ double* produceKNC (int brng, int seed, double p1, double p2) {
 	CheckVslError(errcode3);
 
 	return knc_prn_buffer;
+}
+
+double* produceKNCuniform (int brng, int seed) {
+	
+	int method = VSL_RNG_METHOD_UNIFORM_BOXMULLER;
+	int errcode1=-1, errcode2=-1, errcode3=-1;
+
+    double *uniform_knc_prn_buffer = new double [MAX_PRNS];
+    VSLStreamStatePtr stream2;
+
+
+	#pragma offload target(mic) in(brng, seed, stream2, method) out(knc_prn_buffer: length(MAX_PRNS))
+	{
+		/***** Initialize *****/
+		errcode1 = vslNewStream( &stream2, brng, seed );
+		//    CheckVslError( errcode );
+
+		/***** Call RNG *****/
+		errcode2 = vdRngUniform( method, stream2, MAX_PRNS, uniform_knc_prn_buffer, p1, p2 );
+		//   CheckVslError( errcode );
+
+		/***** Deinitialize *****/
+		errcode3 = vslDeleteStream( &stream2 );
+		//    CheckVslError( errcode );
+	}
+
+	CheckVslError(errcode1);
+	CheckVslError(errcode2);
+	CheckVslError(errcode3);
+
+	return uniform_knc_prn_buffer;
 }
 #endif
 #endif
@@ -528,6 +559,94 @@ void PseudoRandomGenerator::MKLArrayProducerKNC (unsigned tid) {
 	}
 	#endif
 	#endif
+}
+
+void PseudoRandomGenerator::MKLArrayProducerKNCuniform (unsigned tid) {
+	#ifdef D_MKL
+	#ifdef D_KNC
+	int brng = VSL_BRNG_MT19937;
+	int errcode;
+	int nn = MAX_PRNS;
+	int seed;
+
+	seed = time(NULL);
+
+	while (!shutdown_prn) {
+
+		if (uniform_last_update_knc[tid] == false){
+			uniform_knc_prns2[tid] = produceKNC(brng, seed, p1, p2);
+
+			uniform_next_knc_buffer[tid] = true;
+
+			uniform_first_generated_knc[tid] = true;
+		} else {
+
+			uniform_knc_prns1[tid] = produceKNC(brng, seed, p1, p2);
+			uniform_next_knc_buffer[tid] = false;
+
+			uniform_first_generated_knc[tid] = true;
+		}
+
+		{
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_prns_mt[tid]);
+			uniform_wait_prns[tid].notify_all();
+		}
+		{
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_knc_produce_mt[tid]);
+			uniform_wait_knc_produce[tid].wait(_lock);
+		}
+	}
+	#endif
+	#endif
+}
+
+double PseudoRandomGenerator::uniformMKLKNC (unsigned tid) {
+
+	double val;
+
+	#ifdef D_MKL
+	#ifdef D_KNC
+
+	if ((uniform_first_generated_knc[tid] == false || uniform_current_prn_knc2[tid] >= (MAX_PRNS * 0.99)) && uniform_which_knc_buffer[tid] == uniform_next_knc_buffer[tid]) {
+		
+        uniform_wait_knc_produce[tid].notify_all();
+		{
+		boost::unique_lock<boost::mutex> _lock (uniform_wait_prns_mt[tid]);
+		uniform_wait_prns[tid].wait(_lock);
+		}
+	}
+
+	if (uniform_which_knc_buffer[tid] == true) {
+		val = uniform_knc_prns2[tid][uniform_current_prn_knc2[tid]++];
+
+		if ((uniform_current_prn_knc2[tid] > (MAX_PRNS * 0.01)) && uniform_last_update_knc[tid] != uniform_which_knc_buffer[tid] ){
+			uniform_wait_knc_produce[tid].notify_all();
+			uniform_last_update_knc[tid] = uniform_which_knc_buffer[tid];
+		}
+
+		if (uniform_current_prn_knc2[tid] == MAX_PRNS) {	
+			uniform_which_knc_buffer[tid] = 1 - uniform_which_knc_buffer[tid];
+			uniform_current_prn_knc2[tid] = 0;
+		}
+	} else {
+		val = uniform_knc_prns1[tid][uniform_current_prn_knc2[tid]++];
+
+		if ((uniform_current_prn_knc2[tid] > (MAX_PRNS * 0.01)) && uniform_last_update_knc[tid] != uniform_which_knc_buffer[tid] ) {
+			
+			boost::unique_lock<boost::mutex> _lock (uniform_wait_knc_produce_mt[tid]);
+			uniform_wait_knc_produce[tid].notify_all();
+			uniform_last_update_knc[tid] = uniform_which_knc_buffer[tid];
+		}
+
+		if (uniform_current_prn_knc2[tid] == MAX_PRNS) {	
+			uniform_which_knc_buffer[tid] = 1 - uniform_which_knc_buffer[tid];
+			uniform_current_prn_knc2[tid] = 0;
+		}
+	}
+	#endif
+	#endif
+
+	return val;
 }
 
 double PseudoRandomGenerator::gaussianMKLKNC (unsigned tid) {
@@ -629,6 +748,11 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 	wait_knc_produce_mt = new boost::mutex [number_of_threads];
 	wait_knc_produce = new boost::condition_variable [number_of_threads];
 
+	uniform_wait_prns_mt = new boost::mutex [number_of_threads];
+	uniform_wait_prns = new boost::condition_variable [number_of_threads];
+	uniform_wait_knc_produce_mt = new boost::mutex [number_of_threads];
+	uniform_wait_knc_produce = new boost::condition_variable [number_of_threads];
+
 	current_prn_knc = new int [number_of_threads];
 	current_prn_knc2 = new int [number_of_threads];
 	which_knc_buffer = new bool [number_of_threads];
@@ -636,10 +760,20 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 	first_generated_knc = new bool [number_of_threads];
 	last_update_knc = new bool [number_of_threads];
 
+	uniform_current_prn_knc = new int [number_of_threads];
+	uniform_current_prn_knc2 = new int [number_of_threads];
+	uniform_which_knc_buffer = new bool [number_of_threads];
+	uniform_next_knc_buffer = new bool [number_of_threads];
+	uniform_first_generated_knc = new bool [number_of_threads];
+	uniform_last_update_knc = new bool [number_of_threads];
+
     knc_streams = new VSLStreamStatePtr[number_of_threads];
 
     knc_prns1 = new double*[number_of_threads];
     knc_prns2 = new double*[number_of_threads];
+
+    uniform_knc_prns1 = new double*[number_of_threads];
+    uniform_knc_prns2 = new double*[number_of_threads];
 
 	for (unsigned i = 0; i < number_of_threads; i++) {
 		which_knc_buffer[i] = true;
@@ -647,14 +781,18 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 		first_generated_knc[i] = false;
 		current_prn_knc2[i] = 0;
 		last_update_knc[i] = false;
+
+		uniform_which_knc_buffer[i] = true;
+		uniform_next_knc_buffer[i] = true;
+		uniform_first_generated_knc[i] = false;
+		uniform_current_prn_knc2[i] = 0;
+		uniform_last_update_knc[i] = false;
 	}
 	#endif
 
 	#ifdef D_GPU
 	gpu_prns1 = new double* [number_of_threads];
 	gpu_prns2 = new double* [number_of_threads];
-
-	// streams = new cudaStream_t [number_of_threads];
 
 	gpu_wait_prn_request = new boost::condition_variable [number_of_threads];
 	consumer_gpu_wait_prn = new boost::condition_variable [number_of_threads];
@@ -673,18 +811,7 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 
 	for (unsigned i = 0; i < number_of_threads; i++) {
 
-		// #ifdef D_MKL
-		// gpu_prns1[i] = (double*) _mm_malloc (MAX_PRNS * sizeof(double), 64);
-		// gpu_prns2[i] = (double*) _mm_malloc (MAX_PRNS * sizeof(double), 64);
-		// #else
-		// gpu_prns1[i] = new double[MAX_PRNS];
-		// gpu_prns2[i] = new double[MAX_PRNS];
-		// #endif
-		// cudaMallocHost(&gpu_prns1[i], MAX_PRNS * sizeof(double));
-		// cudaMallocHost(&gpu_prns2[i], MAX_PRNS * sizeof(double));
-
 		current_gpu_prn[i] = 0;
-
 		final_time[i] = 0;
 
 		which_gpu_buffer[i] = true;
@@ -893,12 +1020,15 @@ void PseudoRandomGenerator::shutdownMKL (void) {
 }
 
 
-void PseudoRandomGenerator::shutdownKNC (unsigned tid) {
+void PseudoRandomGenerator::shutdownKNC (void) {
 	#ifdef D_KNC
 	shutdown_prn = true;
-	{
-		boost::unique_lock<boost::mutex> _lock (wait_knc_produce_mt[tid]);
-		wait_knc_produce[tid].notify_all();
+	for (unsigned i = 0; i < number_of_threads; i++) {
+		boost::unique_lock<boost::mutex> _lock (wait_knc_produce_mt[i]);
+		wait_knc_produce[i].notify_all();
+
+		boost::unique_lock<boost::mutex> _lock (uniform_wait_knc_produce_mt[i]);
+		uniform_wait_knc_produce[i].notify_all();
 	}
 	#endif
 }
@@ -912,12 +1042,12 @@ void PseudoRandomGenerator::MKLArrayProducerUniform (void) {
 
 		if (uniform_which_mkl == true){
 			// generate_mkl = true;
-			vdRngGaussian(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns1, p1, p2);
+			vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns1);
 			uniform_current_prn = 0;
 			// cout << endl<<"GEROU PRNS1" << endl << endl;
 		} else {
 			// generate_mkl = true;
-			vdRngGaussian(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns2, p1, p2);
+			vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns2);
 			uniform_current_prn = 0;
 			// cout << endl<<"GEROU PRNS2" << endl << endl;
 		}
@@ -1397,6 +1527,59 @@ double PseudoRandomGenerator::gaussianGPU2 (unsigned tid) {
 	return val;
 }
 
+void PseudoRandomGenerator::stopProducers (void) {
+	switch (prng_to_use) {
+        #ifdef D_MKL
+		case MKLA2:	shutdownMKL(); break;
+		#endif
+		#ifdef D_GPU
+        case CURAND: shutdownGPU();	break;
+		#endif
+		#ifdef D_KNC
+		case KNC: shutdownMKL(); break;
+		#endif
+		default: break;
+	}
+
+	for (unsigned tt = 0; tt < number_of_threads; tt++) {
+		uniform_producer_threads[tt].join();
+		gaussian_producer_threads[tt].join();
+	}
+}
+
+void PseudoRandomGenerator::launchProducers (void) {
+
+	// launch uniform and gaussian producers
+	uniform_producer_threads = new boost::thread [number_of_threads];
+	gaussian_producer_threads = new boost::thread [number_of_threads];
+
+	switch (prng_to_use) {
+        #ifdef D_MKL
+		case MKLA2:		for (unsigned tt = 0; tt < number_of_threads; tt++) {
+							uniform_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::MKLArrayProducerUniform, this, tt));
+							gaussian_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::gaussianMKLA2, this, tt));
+						}
+						break;
+		#endif
+		#ifdef D_GPU
+        case CURAND:	for (unsigned tt = 0; tt < number_of_threads; tt++) {
+							uniform_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::uniformGPUArrayProducer2, this, tt));
+							gaussian_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::GPUArrayProducer2, this, tt));
+						}
+						break;
+		#endif
+		#ifdef D_KNC
+		case KNC:		for (unsigned tt = 0; tt < number_of_threads; tt++) {
+								uniform_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::MKLArrayProducerKNCuniform, this, tt));
+								gaussian_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::MKLArrayProducerKNC, this, tt));
+							}
+						break;
+		#endif
+		default: break;
+	}
+
+}
+
 void PseudoRandomGenerator::shutdownGPU (void) {
 	#ifdef D_GPU
 	shutdown_prn = true;
@@ -1404,6 +1587,9 @@ void PseudoRandomGenerator::shutdownGPU (void) {
 	for (unsigned i = 0; i < number_of_threads; i++) {
 		boost::unique_lock<boost::mutex> _lock (wait_gpu_mt[i]);
 		gpu_wait_prn_request[i].notify_all();
+
+		boost::unique_lock<boost::mutex> _lock (uniform_wait_gpu_mt[i]);
+		uniform_gpu_wait_prn_request[i].notify_all();
 	}
 	#endif
 }

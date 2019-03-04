@@ -66,6 +66,8 @@ class PseudoRandomGenerator {
 	bool last_update = false;
 	bool first_generated = false;
 
+	boost::thread *uniform_producer_threads, *gaussian_producer_threads;
+
 
 	pcg64_fast rnd; //(pcg_extras::seed_seq_from<std::random_device>{});
 	pcg64_k32_fast rnd64;
@@ -90,13 +92,19 @@ class PseudoRandomGenerator {
 	#ifdef D_KNC
 	boost::mutex *wait_prns_mt, *wait_knc_produce_mt;
 	boost::condition_variable *wait_prns, *wait_knc_produce;
+	boost::mutex *uniform_wait_prns_mt, *uniform_wait_knc_produce_mt;
+	boost::condition_variable *uniform_wait_prns, *uniform_wait_knc_produce;
 	bool *which_knc_buffer;
 	bool *next_knc_buffer;
 	int *current_prn_knc, *current_prn_knc2;
 	bool *first_generated_knc;
 	bool *last_update_knc;
+	int *uniform_current_prn_knc, *uniform_current_prn_knc2;
+	bool *uniform_first_generated_knc;
+	bool *uniform_last_update_knc;
 	VSLStreamStatePtr *knc_streams;
 	double **knc_prns1, **knc_prns2;
+	double **uniform_knc_prns1, **uniform_knc_prns2;
 	#endif
 
 	normal_distribution<> normal;
@@ -198,6 +206,7 @@ public:
 	double uniformMKLA (unsigned tid);
 	void uniformGPUArrayProducer2 (unsigned tid);
 	double uniformGPU2 (unsigned tid);
+	void launchProducers (void);
 };
 
 #endif
