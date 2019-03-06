@@ -9,16 +9,7 @@ extern map<string, unsigned> thread_ids;
 // // alternative lockfree
 boost::lockfree::queue<double> lfq1 (MAX_PRNS);
 boost::lockfree::queue<double> lfq2 (MAX_PRNS);
-// bool is_lfq1 = true;
-// unsigned *current_lfq_prn;
 
-// // alternative simple arrays
-// double _q1 [MAX_PRNS];
-// double _q2 [MAX_PRNS];
-// bool is_q1 = true;
-// unsigned current_prn = 0;
-
-// bool shutdown_prn = false;
 #endif
 
 #ifdef D_MKL
@@ -509,53 +500,33 @@ void PseudoRandomGenerator::MKLArrayProducerKNC (unsigned tid) {
 	seed = time(NULL);
 
 	while (!shutdown_prn) {
+		if (last_update_knc[tid] == false){
 
-		// if (last_update_knc[tid] != next_knc_buffer[tid]) {
-			if (last_update_knc[tid] == false){
+			delete knc_prns2[tid];
 
-				// cout << "a criar 0 " << tid << endl;
-				// delete knc_prns1[tid];
+			knc_prns2[tid] = produceKNC(brng, seed, p1, p2);
 
-				knc_prns2[tid] = produceKNC(brng, seed, p1, p2);
+			next_knc_buffer[tid] = true;
 
-				next_knc_buffer[tid] = true;
-
-				// cout << "criou 0 " << tid << endl;
-
-				first_generated_knc[tid] = true;
-			} else {
-
-				// cout << "a criar 1 " << tid << endl;
-				// delete knc_prns2[tid];
-				
-				knc_prns1[tid] = produceKNC(brng, seed, p1, p2);
-				next_knc_buffer[tid] = false;
-				// cout << "criou 1 " << tid << endl;
-
-				first_generated_knc[tid] = true;
-			}
-
-			// generated_mkl = true;
-			// if (first_generated_knc[tid])
-			// 	current_prn_knc[tid] = 0;
-
-			{
-				boost::unique_lock<boost::mutex> _lock (wait_prns_mt[tid]);
-				wait_prns[tid].notify_all();
-			}
-			// boost::this_thread::sleep_for( boost::chrono::microseconds(50) );
+			first_generated_knc[tid] = true;
+		} else {
 			
-		// }
-		// {
-		// 		boost::unique_lock<boost::mutex> _lock (wait_prns_mt[tid]);
-		// 		wait_prns[tid].notify_all();
-		// 	}
+			delete knc_prns1[tid];
+
+			knc_prns1[tid] = produceKNC(brng, seed, p1, p2);
+			next_knc_buffer[tid] = false;
+
+			first_generated_knc[tid] = true;
+		}
+
 		{
-            // cout << "bloqueou "<< endl;
+			boost::unique_lock<boost::mutex> _lock (wait_prns_mt[tid]);
+			wait_prns[tid].notify_all();
+		}
+		{
 			boost::unique_lock<boost::mutex> _lock (wait_knc_produce_mt[tid]);
 			wait_knc_produce[tid].wait(_lock);
 		}
-		// cout << "chegou 2"<< endl;
 	}
 	#endif
 	#endif
@@ -574,12 +545,15 @@ void PseudoRandomGenerator::MKLArrayProducerKNCuniform (unsigned tid) {
 	while (!shutdown_prn) {
 
 		if (uniform_last_update_knc[tid] == false){
+			delete uniform_knc_prns2[tid];
+
 			uniform_knc_prns2[tid] = produceKNC(brng, seed, p1, p2);
 
 			uniform_next_knc_buffer[tid] = true;
 
 			uniform_first_generated_knc[tid] = true;
 		} else {
+			delete uniform_knc_prns1[tid];
 
 			uniform_knc_prns1[tid] = produceKNC(brng, seed, p1, p2);
 			uniform_next_knc_buffer[tid] = false;
@@ -1006,7 +980,6 @@ double PseudoRandomGenerator::uniformPCG (void) {
 	return (double)rnd()/18446744073709551615.0;
 }
 
-
 double PseudoRandomGenerator::uniform (unsigned tid) {
 
     switch (prng_to_use) {
@@ -1108,15 +1081,11 @@ void PseudoRandomGenerator::MKLArrayProducerUniform (void) {
 	while (!shutdown_prn) {
 
 		if (uniform_which_mkl == true){
-			// generate_mkl = true;
 			vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns1);
 			uniform_current_prn = 0;
-			// cout << endl<<"GEROU PRNS1" << endl << endl;
 		} else {
-			// generate_mkl = true;
 			vdRngUniform(VSL_RNG_METHOD_UNIFORM_STD, uniform_mkl_stream, MAX_PRNS, uniform_mkl_prns2);
 			uniform_current_prn = 0;
-			// cout << endl<<"GEROU PRNS2" << endl << endl;
 		}
 
 		uniform_generated_mkl = true;
@@ -1333,40 +1302,31 @@ void PseudoRandomGenerator::GPUArrayProducer2 (unsigned tid) {
 
 	while (!shutdown_prn) {
 
-		// CURAND_CALL(curandGenerateNormalDouble(gens[tid], devData, MAX_PRNS, p1, p2));
 		CURAND_CALL(curandGenerateNormalDouble(gens, devData, MAX_PRNS, p1, p2));
 		
 		cudaMallocHost(&data, MAX_PRNS*sizeof(double));
-
-		// cout << endl << endl << "CHEGOU1 "<< tid << endl << endl;
 
 		if (which_mkl_gen == true){
 			cudaFreeHost(gpu_prns1[tid]);
 			/* Copy device memory to host */
 			CUDA_CALL(cudaMemcpyAsync(data, devData, MAX_PRNS * sizeof(double), cudaMemcpyDeviceToHost, streams[tid]));
 			
-
 			CUDA_CALL(cudaStreamSynchronize(streams[tid]));
 
 			gpu_prns1[tid] = data;
 
-			// cout << endl << endl << "gerou prns1\t"<< tid << endl << endl;
 			which_mkl_gen = false;
 		} else {
 			cudaFreeHost(gpu_prns2[tid]);
 			/* Copy device memory to host */
 			CUDA_CALL(cudaMemcpyAsync(data, devData, MAX_PRNS * sizeof(double), cudaMemcpyDeviceToHost, streams[tid]));
 			
-
 			CUDA_CALL(cudaStreamSynchronize(streams[tid]));
 
 			gpu_prns2[tid] = data;
 
-			// cout << endl << endl << "gerou prns2\t"<< tid << endl << endl;
 			which_mkl_gen = true;
 		}
-
-		// cout << endl << endl << "CHEGOU3 "<< tid << endl << endl;
 
 		generated_gpu[tid] = true;
 
@@ -1659,6 +1619,7 @@ void PseudoRandomGenerator::reportGPU (void) {
 	#endif
 }
 
+// single buffer
 void PseudoRandomGenerator::GPUArrayProducer (void) {
 	#ifdef D_GPU
 
@@ -1679,33 +1640,19 @@ void PseudoRandomGenerator::GPUArrayProducer (void) {
 
 	while (!shutdown_prn) {
 		/* Generate n floats on device */
-		// cudaEvent_t start, stop;
-		// cudaEventCreate(&start);
-		// cudaEventCreate(&stop);
-		// cudaEventRecord(start);
 
 		CURAND_CALL(curandGenerateNormalDouble(gen, devData, MAX_PRNS, p1, p2));
 
 		if (which_mkl_gen == true){
-			// generate_mkl = true;
 			/* Copy device memory to host */
 			CUDA_CALL(cudaMemcpy(mkl_prns1, devData, MAX_PRNS * sizeof(double), cudaMemcpyDeviceToHost));
-			// cudaEventRecord(stop);
-			// cudaEventSynchronize(stop);
-			// float milliseconds = 0;
-			// cudaEventElapsedTime(&milliseconds, start, stop);
-			// cout << milliseconds << endl;
-			// exit(0);
-			// current_prn = 0;
+			
 			which_mkl_gen = false;
-			// cout << endl<<"GEROU PRNS1" << endl << endl;
 		} else {
-			// generate_mkl = true;
 			/* Copy device memory to host */
 			CUDA_CALL(cudaMemcpy(mkl_prns2, devData, MAX_PRNS * sizeof(double), cudaMemcpyDeviceToHost));
-			// current_prn = 0;
+
 			which_mkl_gen = true;
-			// cout << endl<<"GEROU PRNS2" << endl << endl;
 		}
 
 		generated_mkl = true;
@@ -1715,7 +1662,6 @@ void PseudoRandomGenerator::GPUArrayProducer (void) {
 			wait_mkl.wait(_lock);
 		}
 	}
-	// cout << "chegou"<< endl;
 
 	/* Cleanup */
 	CURAND_CALL(curandDestroyGenerator(gen));
