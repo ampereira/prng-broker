@@ -11,8 +11,8 @@ DEFINES =
 LIB_NAME = libPrngManager
 
 ifeq ($(PRNGM_INTEL),yes)
-CXX = icpc  -DD_HEPF_INTEL -qopenmp
-LD  = icpc  -DD_HEPF_INTEL -qopenmp
+CXX = icpc -DD_HEPF_INTEL 
+LD  = icpc -DD_HEPF_INTEL 
 else
 CXX = g++
 LD  = g++
@@ -54,19 +54,6 @@ ifeq ($(PRNGM_KNC),yes)
 	KNC_FLAGS += -DD_KNC -I${MKLROOT}/include -offload-option,mic,compiler," -L${MKLROOT}/lib/mic -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core"
 endif
 
-ifeq ($(PRNGM_MPI),yes)
-	ifeq ($(PRNGM_INTEL),yes)
-		CXX = mpiicpc -DD_HEPF_INTEL
-		LD  = mpiicpc -DD_HEPF_INTEL
-		CXXFLAGS += -DD_MPI
-	else
-		CXX = mpicxx
-		LD  = mpicxx
-		CXXFLAGS += -DD_MPI
-	endif
-endif
-
-
 ifeq ($(PRNGM_DEBUG),yes)
 	CXXFLAGS += -g
 else
@@ -77,15 +64,15 @@ ifeq ($(strip $(BOOST_DIR)),)
 	# GPU OFFLOAD
 	ifeq ($(PRNGM_GPU),yes)
 		KNC_FLAGS=-DD_LOL
-		ifeq ($(PRNGM_MPI),yes)
+		ifeq ($(PRNGM_INTEL),yes)
 			INCLUDES = -I$(ROOTSYS)/include
-			CXX = nvcc $(INCLUDES) $(GPULIBS) -c -O3 -lcurand -ccbin=mpiicpc --compiler-options "
-			LD = nvcc $(INCLUDES) $(GPULIBS) -O3 -lcurand -ccbin=mpiicpc --compiler-options "
-			CXXFLAGS += -DD_GPU -DD_HEPF_INTEL -DD_MPI
+			CXX = nvcc $(INCLUDES) $(GPULIBS) -c -O3 -lcurand -ccbin=icpc --compiler-options "
+			LD = nvcc $(INCLUDES) $(GPULIBS) -O3 -lcurand -ccbin=icpc --compiler-options "
+			CXXFLAGS += -DD_GPU -DD_HEPF_INTEL 
 			LIBS += "
 			ROOTGLIBS = $(GPU_ROOTGLIBS)
 		else
-			INCLUDES = -I$(ROOTSYS)/include -I../tools/ -I../tools/Delphes-3.2.0/
+			INCLUDES = -I$(ROOTSYS)/include
 			CXX = nvcc $(INCLUDES) -c -O3 -lcurand --compiler-options "
 			LD = nvcc $(INCLUDES) -O3 -lcurand --compiler-options "
 			CXXFLAGS += -DD_GPU
@@ -102,10 +89,10 @@ else
 	
 	ifeq ($(PRNGM_GPU),yes)
 		KNC_FLAGS=-DD_LOL
-		ifeq ($(PRNGM_MPI),yes)
-			CXX = nvcc $(INCLUDES) $(GPULIBS) -c -O3 -lcurand -ccbin=mpiicpc --compiler-options "
-			LD = nvcc $(INCLUDES) $(GPULIBS) -O3 -lcurand -ccbin=mpiicpc --compiler-options "
-			CXXFLAGS += -DD_GPU -DD_HEPF_INTEL -DD_MPI
+		ifeq ($(PRNGM_INTEL),yes)
+			CXX = nvcc $(INCLUDES) $(GPULIBS) -c -O3 -lcurand -ccbin=icpc --compiler-options "
+			LD = nvcc $(INCLUDES) $(GPULIBS) -O3 -lcurand -ccbin=icpc --compiler-options "
+			CXXFLAGS += -DD_GPU -DD_HEPF_INTEL 
 			LIBS += "
 			ROOTGLIBS = $(GPU_ROOTGLIBS)
 		else

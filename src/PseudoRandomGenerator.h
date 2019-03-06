@@ -207,6 +207,10 @@ public:
 	void uniformGPUArrayProducer2 (unsigned tid);
 	double uniformGPU2 (unsigned tid);
 	void launchProducers (void);
+	double uniformMKLKNC (unsigned tid);
+	void shutdownKNC (void);
+	void stopProducers (void);
+	void MKLArrayProducerKNCuniform (unsigned tid);
 };
 
 #endif

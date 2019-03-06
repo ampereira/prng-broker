@@ -719,9 +719,70 @@ double PseudoRandomGenerator::gaussianMKLKNC (unsigned tid) {
 	return val;
 }
 
-// double prod = 0;
 PseudoRandomGenerator::PseudoRandomGenerator (void) {
+	stopProducers();
 
+	#ifdef D_ROOT
+	delete t_rnd;
+    #endif
+
+
+	delete current_mkl_prns;
+	delete uniform_current_mkl_prns;
+	delete mt64c;
+	delete mkl_prns1;
+	delete mkl_prns2;
+	delete uniform_mkl_prns1;
+	delete uniform_mkl_prns2;
+
+	#ifdef D_KNC
+	delete wait_prns_mt;
+	delete wait_prns;
+	delete wait_knc_produce_mt;
+	delete wait_knc_produce;
+	delete uniform_wait_prns_mt;
+	delete uniform_wait_prns;
+	delete uniform_wait_knc_produce_mt;
+	delete uniform_wait_knc_produce;
+	delete current_prn_knc;
+	delete current_prn_knc2;
+	delete which_knc_buffer;
+	delete next_knc_buffer;
+	delete first_generated_knc;
+	delete last_update_knc;
+	delete uniform_current_prn_knc;
+	delete uniform_current_prn_knc2;
+	delete uniform_which_knc_buffer;
+	delete uniform_next_knc_buffer;
+	delete uniform_first_generated_knc;
+	delete uniform_last_update_knc;
+    delete knc_streams;
+    delete knc_prns1;
+    delete knc_prns2;
+    delete uniform_knc_prns1;
+    delete uniform_knc_prns2;
+	#endif
+
+	#ifdef D_GPU
+	delete gpu_prns1;
+	delete gpu_prns2;
+	delete gpu_wait_prn_request;
+	delete consumer_gpu_wait_prn;
+	delete current_gpu_prn;
+	delete wait_gpu_mt;
+	delete wait_for_gpu_prns;
+	delete uniform_gpu_prns1;
+	delete uniform_gpu_prns2;
+	delete uniform_gpu_wait_prn_request;
+	delete uniform_consumer_gpu_wait_prn;
+	delete uniform_current_gpu_prn;
+	delete uniform_wait_gpu_mt;
+	delete uniform_wait_for_gpu_prns;
+	delete which_gpu_buffer;
+	delete generated_gpu;
+	delete uniform_which_gpu_buffer;
+	delete uniform_generated_gpu;
+	#endif
 }
 
 void PseudoRandomGenerator::init (unsigned num_threads) {
@@ -793,32 +854,39 @@ void PseudoRandomGenerator::init (unsigned num_threads) {
 	#ifdef D_GPU
 	gpu_prns1 = new double* [number_of_threads];
 	gpu_prns2 = new double* [number_of_threads];
-
 	gpu_wait_prn_request = new boost::condition_variable [number_of_threads];
 	consumer_gpu_wait_prn = new boost::condition_variable [number_of_threads];
-
 	current_gpu_prn = new unsigned [number_of_threads];
-
 	wait_gpu_mt = new boost::mutex [number_of_threads];
 	wait_for_gpu_prns = new boost::mutex [number_of_threads];
 
-
-
-	awake_gpu = new boost::condition_variable [number_of_threads];
+	uniform_gpu_prns1 = new double* [number_of_threads];
+	uniform_gpu_prns2 = new double* [number_of_threads];
+	uniform_gpu_wait_prn_request = new boost::condition_variable [number_of_threads];
+	uniform_consumer_gpu_wait_prn = new boost::condition_variable [number_of_threads];
+	uniform_current_gpu_prn = new unsigned [number_of_threads];
+	uniform_wait_gpu_mt = new boost::mutex [number_of_threads];
+	uniform_wait_for_gpu_prns = new boost::mutex [number_of_threads];
 
 	which_gpu_buffer = new bool[number_of_threads];
 	generated_gpu = new bool[number_of_threads];
 
+	uniform_which_gpu_buffer = new bool[number_of_threads];
+	uniform_generated_gpu = new bool[number_of_threads];
+
 	for (unsigned i = 0; i < number_of_threads; i++) {
-
 		current_gpu_prn[i] = 0;
-		final_time[i] = 0;
-
+		//final_time[i] = 0;
 		which_gpu_buffer[i] = true;
 		generated_gpu[i] = false;
 
+		uniform_current_gpu_prn[i] = 0;
+		uniform_which_gpu_buffer[i] = true;
+		uniform_generated_gpu[i] = false;
 	}
 	#endif
+
+	launchProducers();
 }
 
 void PseudoRandomGenerator::initialize (double param1, double param2) {
@@ -955,7 +1023,7 @@ double PseudoRandomGenerator::uniform (unsigned tid) {
         case TRandom: return uniformTrand(); break;
         #endif
         #ifdef D_GPU
-        case CURAND: cerr << "Not supported yet" << endl; exit(0); break;
+        case CURAND: uniformGPU2(tid); break;
         #endif
         #ifdef D_KNC
         case KNC: cerr << "Not supported yet" << endl; exit(0); break;
@@ -1018,7 +1086,6 @@ void PseudoRandomGenerator::shutdownMKL (void) {
 		wait_mkl.notify_all();
 	}
 }
-
 
 void PseudoRandomGenerator::shutdownKNC (void) {
 	#ifdef D_KNC
@@ -1417,25 +1484,15 @@ double PseudoRandomGenerator::uniformGPU2 (unsigned tid) {
 
 	if (!uniform_generated_gpu[tid]) {
 		{
-			// gettimeofday(&t[tid], NULL);
-			// long long unsigned initial_time = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
-			
 			boost::unique_lock<boost::mutex> _lock (uniform_wait_for_gpu_prns[tid]);
 			uniform_consumer_gpu_wait_prn[tid].wait(_lock);
-
-			// gettimeofday(&t[tid], NULL);
-			// final_time[tid] = t[tid].tv_sec * TIME_RESOLUTION + t[tid].tv_usec;
 		}
 	}
 
 	if (uniform_current_gpu_prn[tid] == 0){
-		// cout << "a acabar prn2\t" << tid << endl;
-
 		boost::unique_lock<boost::mutex> _lock (uniform_wait_gpu_mt[tid]);
 		uniform_gpu_wait_prn_request[tid].notify_all();
 	}
-
-	// cout << "chegou" << endl;
 
 	if (uniform_which_gpu_buffer[tid] == true) {
 		uniform_current_gpu_prn[tid]++;
@@ -1443,21 +1500,16 @@ double PseudoRandomGenerator::uniformGPU2 (unsigned tid) {
 		if (uniform_current_gpu_prn[tid] == MAX_PRNS-1) {	
 			uniform_which_gpu_buffer[tid] = 1 - uniform_which_gpu_buffer[tid];
 			uniform_current_gpu_prn[tid] = 0;
-
-			// cout << "acabou prn1\t" << tid << endl;
 		}
-
 
 		val = uniform_gpu_prns1[tid][current];
 
 	} else {
 		uniform_current_gpu_prn[tid]++;
 
-
 		if (uniform_current_gpu_prn[tid] == MAX_PRNS-1) {	
 			uniform_which_gpu_buffer[tid] = 1 - uniform_which_gpu_buffer[tid];
 			uniform_current_gpu_prn[tid] = 0;
-			// cout << "acabou prn2\t" << tid << endl;
 		}
 
 		val = uniform_gpu_prns2[tid][current];
@@ -1541,10 +1593,15 @@ void PseudoRandomGenerator::stopProducers (void) {
 		default: break;
 	}
 
+    #ifdef D_MKL
+	uniform_producer_threads[0].join();
+	gaussian_producer_threads[0].join();
+	#else
 	for (unsigned tt = 0; tt < number_of_threads; tt++) {
 		uniform_producer_threads[tt].join();
 		gaussian_producer_threads[tt].join();
 	}
+	#endif
 }
 
 void PseudoRandomGenerator::launchProducers (void) {
@@ -1555,10 +1612,9 @@ void PseudoRandomGenerator::launchProducers (void) {
 
 	switch (prng_to_use) {
         #ifdef D_MKL
-		case MKLA2:		for (unsigned tt = 0; tt < number_of_threads; tt++) {
-							uniform_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::MKLArrayProducerUniform, this, tt));
-							gaussian_producer_threads[tt] = boost::thread(boost::bind(&PseudoRandomGenerator::gaussianMKLA2, this, tt));
-						}
+		// this does not use dual buffer per thread
+		case MKLA2:		uniform_producer_threads[0] = boost::thread(boost::bind(&PseudoRandomGenerator::MKLArrayProducerUniform, this));
+						gaussian_producer_threads[0] = boost::thread(boost::bind(&PseudoRandomGenerator::MKLArrayProducer, this));
 						break;
 		#endif
 		#ifdef D_GPU
@@ -1727,7 +1783,7 @@ double PseudoRandomGenerator::gaussianGPU (void) {
 double PseudoRandomGenerator::gauss (unsigned tid) {
 
 	switch (prng_to_use) {
-		case STL: gaussianSTL(); break;
+		case STL: return gaussianSTL(); break;
         case PCG: return gaussian2(); break;
 
         #ifdef D_MKL
